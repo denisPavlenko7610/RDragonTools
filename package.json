@@ -1,0 +1,20 @@
+{
+  "name": "com.rdragon.tools",
+  "version": "1.2.3",
+  "displayName": "RdTools",
+  "description": "Useful tools for Unity",
+  "unity": "2022.1",
+  "unityRelease": "",
+  "documentationUrl": "",
+  "changelogUrl": "",
+  "licensesUrl": "",
+  "keywords": [
+    "rd",
+    "tools"
+  ],
+  "author": {
+    "name": "RDragon",
+    "email": "denispavlenko7610new@gmail.com",
+    "url": "https://www.youtube.com/channel/UCP_0FkzSCl-7V0Jv6ZaDszQ"
+  }
+}
