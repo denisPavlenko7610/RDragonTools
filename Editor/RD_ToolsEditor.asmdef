@@ -1,0 +1,4 @@
+{
+	"name": "RD_ToolsEditor",
+	"references": ["RD_Tools"]
+}
