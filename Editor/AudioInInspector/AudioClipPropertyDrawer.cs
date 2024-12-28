@@ -2,138 +2,147 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEditor;
 
-namespace UnityEditor.AudioUtils
+namespace UnityEditor.AudioUtil
 {
     [CustomPropertyDrawer(typeof(AudioClip))]
     public class AudioClipPropertyDrawer : PropertyDrawer
     {
-        private enum PlaybackState
+        public override float GetPropertyHeight(SerializedProperty prop, GUIContent label)
+        {
+            return EditorGUI.GetPropertyHeight(prop);
+        }
+
+        private Dictionary<ButtonState, Action<SerializedProperty, AudioClip>> _audioButtonStates =
+            new()
+            {
+                { ButtonState.Play, Play },
+                { ButtonState.Stop, Stop },
+            };
+
+        private enum ButtonState
         {
             Play,
             Stop
         }
 
-        private static readonly GUIStyle WaveformStyle = new GUIStyle();
-        private static string currentClipPath;
+        private static string CurrentClip;
+        private static GUIStyle tempStyle = new GUIStyle();
 
-        private readonly Dictionary<PlaybackState, Action<SerializedProperty, AudioClip>> playbackActions =
-            new()
-            {
-                { PlaybackState.Play, PlayClip },
-                { PlaybackState.Stop, StopClip },
-            };
 
-        public override float GetPropertyHeight(SerializedProperty property, GUIContent label)
+        public override void OnGUI(Rect position, SerializedProperty prop, GUIContent label)
         {
-            return EditorGUI.GetPropertyHeight(property);
-        }
+            EditorGUI.BeginProperty(position, label, prop);
 
-        public override void OnGUI(Rect position, SerializedProperty property, GUIContent label)
-        {
-            EditorGUI.BeginProperty(position, label, property);
-
-            if (property.objectReferenceValue != null)
+            if (prop.objectReferenceValue != null)
             {
-                DrawAudioClipField(position, property, label);
+                float totalWidth = position.width;
+                position.width = totalWidth - (totalWidth / 3.5f);
+                EditorGUI.PropertyField(position, prop, label, true);
+
+                position.x += position.width;
+                position.width = totalWidth / 3.5f;
+                position.height += 2f;
+                DrawButton(position, prop);
             }
             else
             {
-                EditorGUI.PropertyField(position, property, label, true);
+                EditorGUI.PropertyField(position, prop, label, true);
             }
 
             EditorGUI.EndProperty();
         }
 
-        private void DrawAudioClipField(Rect position, SerializedProperty property, GUIContent label)
+        private void DrawButton(Rect position, SerializedProperty prop)
         {
-            float totalWidth = position.width;
-            position.width = totalWidth - (totalWidth / 3.5f);
-            EditorGUI.PropertyField(position, property, label, true);
-
-            position.x += position.width;
-            position.width = totalWidth / 3.5f;
-            position.height += 2f;
-            DrawPlaybackControls(position, property);
-        }
-
-        private void DrawPlaybackControls(Rect position, SerializedProperty property)
-        {
-            if (property.objectReferenceValue is not AudioClip clip) return;
-
-            position.x += 4;
-            position.width -= 5;
-
-            Rect buttonRect = new(position) { width = 30, height = position.height + 2 };
-            Rect waveformRect = new(position) { x = position.x + 22, width = position.width - 25, height = position.height + 2 };
-
-            bool guiEnabledCache = GUI.enabled;
-            GUI.enabled = true;
-
-            if (Event.current.type == EventType.Repaint)
+            if (prop.objectReferenceValue != null)
             {
-                DrawWaveform(waveformRect, property);
+                position.x += 4;
+                position.width -= 5;
+
+                AudioClip clip = prop.objectReferenceValue as AudioClip;
+
+                Rect buttonRect = new Rect(position);
+                buttonRect.width = 30;
+                buttonRect.height += 2;
+
+                bool guiEnabledCache = GUI.enabled;
+                GUI.enabled = true;
+
+                Rect waveformRect = new Rect(position);
+                waveformRect.x += 22;
+                waveformRect.width -= 25;
+                waveformRect.height += 2;
+                if (Event.current.type == EventType.Repaint)
+                {
+                    Texture2D waveformTexture = AssetPreview.GetAssetPreview(prop.objectReferenceValue);
+                    if (waveformTexture != null)
+                    {
+                        GUI.color = Color.white;
+                        tempStyle.normal.background = waveformTexture;
+                        tempStyle.Draw(waveformRect, GUIContent.none, false, false, false, false);
+                        GUI.color = Color.white;
+                    }
+                }
+
+                bool isPlaying = AudioUtility.IsClipPlaying(clip) && (CurrentClip == prop.propertyPath);
+                string buttonText = "";
+                Action<SerializedProperty, AudioClip> buttonAction;
+                if (isPlaying)
+                {
+                    EditorUtility.SetDirty(prop.serializedObject.targetObject);
+                    buttonAction = GetStateInfo(ButtonState.Stop, out buttonText);
+
+                    Rect progressRect = new Rect(waveformRect);
+                    float percentage = (float)AudioUtility.GetClipSamplePosition(clip) /
+                                       AudioUtility.GetSampleCount(clip);
+                    float width = progressRect.width * percentage;
+                    progressRect.width = Mathf.Clamp(width, 6, width);
+                    GUI.Box(progressRect, "", "SelectionRect");
+                }
+                else
+                {
+                    buttonAction = GetStateInfo(ButtonState.Play, out buttonText);
+                }
+
+                if (GUI.Button(buttonRect, buttonText))
+                {
+                    AudioUtility.StopAllClips();
+                    buttonAction(prop, clip);
+                }
+
+                GUI.enabled = guiEnabledCache;
             }
-
-            bool isPlaying = AudioUtility.IsClipPlaying(clip) && (currentClipPath == property.propertyPath);
-            string buttonText = GetButtonText(isPlaying);
-            Action<SerializedProperty, AudioClip> buttonAction = playbackActions[isPlaying ? PlaybackState.Stop : PlaybackState.Play];
-
-            if (isPlaying)
-            {
-                DrawPlaybackProgress(waveformRect, clip);
-            }
-
-            if (GUI.Button(buttonRect, buttonText))
-            {
-                AudioUtility.StopAllClips();
-                buttonAction(property, clip);
-            }
-
-            GUI.enabled = guiEnabledCache;
         }
 
-        private void DrawWaveform(Rect waveformRect, SerializedProperty property)
+        private static void Play(SerializedProperty prop, AudioClip clip)
         {
-            Texture2D waveformTexture = AssetPreview.GetAssetPreview(property.objectReferenceValue);
-            if (waveformTexture == null) return;
-
-            GUI.color = Color.white;
-            WaveformStyle.normal.background = waveformTexture;
-            WaveformStyle.Draw(waveformRect, GUIContent.none, false, false, false, false);
-            GUI.color = Color.white;
-        }
-
-        private void DrawPlaybackProgress(Rect waveformRect, AudioClip clip)
-        {
-            Rect progressRect = new(waveformRect)
-            {
-                width = Mathf.Clamp(waveformRect.width * GetPlaybackProgress(clip), 6, waveformRect.width)
-            };
-            GUI.Box(progressRect, GUIContent.none, "SelectionRect");
-        }
-
-        private static float GetPlaybackProgress(AudioClip clip)
-        {
-            return (float)AudioUtility.GetClipSamplePosition(clip) / AudioUtility.GetSampleCount(clip);
-        }
-
-        private static string GetButtonText(bool isPlaying)
-        {
-            return isPlaying ? "■" : "►";
-        }
-
-        private static void PlayClip(SerializedProperty property, AudioClip clip)
-        {
-            currentClipPath = property.propertyPath;
+            CurrentClip = prop.propertyPath;
             AudioUtility.PlayClip(clip);
         }
 
-        private static void StopClip(SerializedProperty property, AudioClip clip)
+        private static void Stop(SerializedProperty prop, AudioClip clip)
         {
-            currentClipPath = string.Empty;
+            CurrentClip = "";
             AudioUtility.StopAllClips();
+        }
+
+        private Action<SerializedProperty, AudioClip> GetStateInfo(ButtonState state, out string buttonText)
+        {
+            switch (state)
+            {
+                case ButtonState.Play:
+                    buttonText = "►";
+                    break;
+                case ButtonState.Stop:
+                    buttonText = "■";
+                    break;
+                default:
+                    buttonText = "?";
+                    break;
+            }
+
+            return _audioButtonStates[state];
         }
     }
 }

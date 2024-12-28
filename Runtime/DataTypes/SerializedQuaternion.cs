@@ -1,7 +1,7 @@
 ﻿using System;
 using UnityEngine;
 
-namespace RDTools.Runtime
+namespace RDTools.DataTypes
 {
     [Serializable]
     public struct SerializedQuaternion
@@ -19,48 +19,9 @@ namespace RDTools.Runtime
             this.w = w;
         }
 
-        public override bool Equals(object obj)
-        {
-            if (!(obj is SerializedQuaternion))
-            {
-                return false;
-            }
+        public override string ToString() => string.Format($"[{x}, {y}, {z}, {w}]");
 
-            var s = (SerializedQuaternion)obj;
-            return x == s.x &&
-                   y == s.y &&
-                   z == s.z &&
-                   w == s.w;
-        }
-
-        public override int GetHashCode()
-        {
-            return HashCode.Combine(x, y, z, w);
-        }
-
-        public Quaternion ToQuaternion()
-        {
-            return new Quaternion(x, y, z, w);
-        }
-
-        public static bool operator ==(SerializedQuaternion a, SerializedQuaternion b)
-        {
-            return a.x == b.x && a.y == b.y && a.z == b.z && a.w == b.w;
-        }
-
-        public static bool operator !=(SerializedQuaternion a, SerializedQuaternion b)
-        {
-            return !(a == b);
-        }
-
-        public static implicit operator Quaternion(SerializedQuaternion s)
-        {
-            return new Quaternion(s.x, s.y, s.z, s.w);
-        }
-
-        public static implicit operator SerializedQuaternion(Quaternion q)
-        {
-            return new SerializedQuaternion(q.x, q.y, q.z, q.w);
-        }
+        public static implicit operator Quaternion(SerializedQuaternion value) => new Quaternion(value.x, value.y, value.z, value.w);
+        public static implicit operator SerializedQuaternion(Quaternion value) => new SerializedQuaternion(value.x, value.y, value.z, value.w);
     }
 }

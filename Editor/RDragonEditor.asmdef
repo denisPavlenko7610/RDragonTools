@@ -1,0 +1,16 @@
+{
+    "name": "RDEditor",
+    "rootNamespace": "",
+    "references": [
+        "GUID:282743afe0c9d3949a7dcea9b82fbf89"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

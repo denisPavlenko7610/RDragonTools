@@ -1,7 +1,6 @@
 ﻿using System;
 using UnityEngine;
 using System.Collections.Generic;
-using UnityEngine.Serialization;
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -23,180 +22,196 @@ namespace RDTools
         #region Parameters
 
 #if UNITY_EDITOR
-        [SerializeField] private SceneAsset sceneAsset;
-        [FormerlySerializedAs("logErrorIfNotInBuild")] [SerializeField] private bool isRequired = false;
+        [SerializeField] SceneAsset sceneAsset;
+        [UnityEngine.Serialization.FormerlySerializedAs("logErrorIfNotInBuild")] [SerializeField]
+        bool required = false;
 #endif
 
-        [SerializeField] private int buildIndex = -1; // Default to -1 to indicate no scene assigned.
+#pragma warning disable 414
+        [SerializeField] int buildIndex;
+#pragma warning restore 414
 
         #endregion
 
         /// <summary>
-        /// Gets the scene build index. Returns -1 if no scene is assigned or it's not added to builds.
-        /// Avoid using this within <see cref="ISerializationCallbackReceiver"/> methods.
+        /// Gets the scene build index. -1 if no scene was assigned or it's not added to builds.
+        /// Don't use it from a <see cref="ISerializationCallbackReceiver"/> method.
         /// </summary>
+
         public int BuildIndex
         {
             get
             {
 #if UNITY_EDITOR
-                UpdateBuildIndexIfNeeded();
+                {
+                    buildIndex = GetSceneBuildIndex(sceneAsset);
+                    if (required && buildIndex < 0)
+                    {
+                        if (sceneAsset != null)
+                            Debug.LogError(
+                                $"Trisibo.SceneField: The following scene is assigned to a scene field as required, but isn't added to builds: {AssetDatabase.GetAssetPath(sceneAsset)}");
+                        else
+                            Debug.LogError(
+                                $"Trisibo.SceneField: A scene field is marked as required, but no scene is assigned");
+                    }
+                }
 #endif
+
                 return buildIndex;
             }
         }
 
+        #region ISerializationCallbackReceiver implementation
+
 #if UNITY_EDITOR
+        
         /// <summary>
-        /// Called before serialization to update the build index and check if required scenes are missing.
+        /// Implementation of <see cref="ISerializationCallbackReceiver.OnBeforeSerialize"/>.
         /// </summary>
         void ISerializationCallbackReceiver.OnBeforeSerialize()
         {
-            UpdateBuildIndexIfNeeded();
-            if (isRequired && buildIndex < 0)
-                BuildProcessor.RegisterMissingRequiredScene(sceneAsset);
-        }
+            buildIndex = GetSceneBuildIndex(sceneAsset);
 
+            if (required && buildIndex < 0)
+                BuildProcessor.AddMissingRequiredSceneBuildError(sceneAsset);
+        }
+        
         /// <summary>
         /// Implementation of <see cref="ISerializationCallbackReceiver.OnAfterDeserialize"/>.
         /// </summary>
-        void ISerializationCallbackReceiver.OnAfterDeserialize() { }
-
-        /// <summary>
-        /// Updates the build index for the assigned scene asset.
-        /// </summary>
-        private void UpdateBuildIndexIfNeeded()
+        void ISerializationCallbackReceiver.OnAfterDeserialize()
         {
-            if (sceneAsset != null)
-                buildIndex = GetSceneBuildIndex(sceneAsset);
-            
-            if (isRequired && buildIndex < 0)
-            {
-                LogMissingSceneError();
-            }
         }
+        
+#endif
 
-        /// <summary>
-        /// Logs an error when a required scene is not added to the build settings.
-        /// </summary>
-        private void LogMissingSceneError()
-        {
-            if (sceneAsset != null)
-            {
-                Debug.LogError($"RDTools.Scene: The following scene is assigned as required, but isn't added to builds: {AssetDatabase.GetAssetPath(sceneAsset)}");
-            }
-            else
-            {
-                Debug.LogError("RDTools.Scene: A required scene field is marked as required, but no scene is assigned.");
-            }
-        }
+        #endregion
 
-        #region Build Processor (Editor only)
+        #region Build processor
+
+#if UNITY_EDITOR
+        
         class BuildProcessor : IPreprocessBuildWithReport, IPostprocessBuildWithReport
         {
-            private static HashSet<SceneAsset> missingRequiredSceneAssets = new();
-            private static bool isRequiredSceneUnassigned;
-
-            public static void RegisterMissingRequiredScene(SceneAsset sceneAsset)
+            static HashSet<SceneAsset> missingRequiredSceneAssets = new HashSet<SceneAsset>();
+            static bool requiredSceneIsUnassigned;
+            
+            /// <summary>Adds a missing required scene error to be shown when building. The added errors will be cleared when a new build is started.</summary>
+            public static void AddMissingRequiredSceneBuildError(SceneAsset sceneAsset)
             {
                 if (sceneAsset != null)
                     missingRequiredSceneAssets.Add(sceneAsset);
                 else
-                    isRequiredSceneUnassigned = true;
+                    requiredSceneIsUnassigned = true;
             }
 
-            public int callbackOrder => 0;
+            /// <summary>Implementation of <see cref="IOrderedCallback.callbackOrder"/>.</summary>
+            int IOrderedCallback.callbackOrder => 0;
 
-            public void OnPreprocessBuild(BuildReport report)
-            {
-                ClearBuildCache();
-            }
 
-            public void OnPostprocessBuild(BuildReport report)
+            /// <summary>Implementation of <see cref="IPreprocessBuildWithReport.OnPreprocessBuild"/>.</summary>
+            void IPreprocessBuildWithReport.OnPreprocessBuild(BuildReport report)
             {
-                ValidateBuild();
-            }
-
-            private static void ClearBuildCache()
-            {
+                UpdateCachedBuildIndexes();
                 missingRequiredSceneAssets.Clear();
-                isRequiredSceneUnassigned = false;
+                requiredSceneIsUnassigned = false;
             }
 
-            private static void ValidateBuild()
+            /// <summary>Implementation of <see cref="IPostprocessBuildWithReport.OnPostprocessBuild"/>.</summary>
+            void IPostprocessBuildWithReport.OnPostprocessBuild(BuildReport report)
             {
                 string errorMessage = null;
 
-                if (isRequiredSceneUnassigned)
-                    errorMessage += "  - A required scene field doesn't have an assigned scene.";
+                if (requiredSceneIsUnassigned)
+                    errorMessage += "  - A required scene field doesn't have an assigned scene";
 
                 if (missingRequiredSceneAssets.Count > 0)
                 {
-                    errorMessage = string.IsNullOrEmpty(errorMessage) ? "" : errorMessage + "\n";
-                    errorMessage += "  - The following scenes are required but are not added to builds:";
-
+                    if (errorMessage != null)
+                        errorMessage += "\n";
+                    errorMessage +=
+                        "  - The following scenes are assigned to scene fields as required, but aren't added to builds:";
                     foreach (var sceneAsset in missingRequiredSceneAssets)
                         errorMessage += $"\n    - {AssetDatabase.GetAssetPath(sceneAsset)}";
 
                     missingRequiredSceneAssets.Clear();
                 }
 
-                if (!string.IsNullOrEmpty(errorMessage))
+                if (errorMessage != null)
                 {
-                    errorMessage = $"RDTools.Scene: The following errors have been found:\n{errorMessage}";
+                    errorMessage = $"RDTools.Scene: The following errors have been found:\n" + errorMessage;
                     throw new BuildFailedException(errorMessage);
                 }
             }
         }
+
+
+#endif
+
         #endregion
 
-#if UNITY_EDITOR
-        private static Dictionary<SceneAsset, int> cachedBuildIndexes = new();
 
-        static Scene()
-        {
-            // Automatically refresh build indexes whenever scenes change in the build settings.
-            EditorBuildSettings.sceneListChanged -= UpdateCachedBuildIndexes;
-            EditorBuildSettings.sceneListChanged += UpdateCachedBuildIndexes;
-            UpdateCachedBuildIndexes();
-        }
+        #region Editor members
+
+#if UNITY_EDITOR
+
+
+        static Dictionary<SceneAsset, int> cachedBuildIndexes = new Dictionary<SceneAsset, int>();
+
 
         /// <summary>
-        /// Updates the cached build indexes based on the scenes in the build settings.
+        /// Updates the cached build indexes.
         /// </summary>
-        private static void UpdateCachedBuildIndexes()
+        static void UpdateCachedBuildIndexes()
         {
             cachedBuildIndexes.Clear();
-            int buildIndex = -1;
 
+            int buildIndex = -1;
             foreach (var scene in EditorBuildSettings.scenes)
             {
                 if (scene.enabled)
                 {
                     buildIndex++;
-                    var sceneAsset = AssetDatabase.LoadAssetAtPath<SceneAsset>(scene.path);
+                    SceneAsset sceneAsset = AssetDatabase.LoadAssetAtPath<SceneAsset>(scene.path);
                     if (sceneAsset != null)
-                        cachedBuildIndexes[sceneAsset] = buildIndex;
+                        cachedBuildIndexes.Add(sceneAsset, buildIndex);
                 }
             }
         }
 
         /// <summary>
-        /// Retrieves the build index of the specified scene asset.
+        /// Called by Unity when loading the editor.
         /// </summary>
-        /// <param name="sceneAsset">The scene asset to retrieve the build index for.</param>
-        /// <returns>The build index of the scene asset, or -1 if not found.</returns>
-        private static int GetSceneBuildIndex(SceneAsset sceneAsset)
+        [InitializeOnLoadMethod]
+        static void OnEditorInitializeOnLoad()
         {
-            return sceneAsset != null && cachedBuildIndexes.TryGetValue(sceneAsset, out var index) ? index : -1;
+            UpdateCachedBuildIndexes();
+
+            EditorBuildSettings.sceneListChanged -= UpdateCachedBuildIndexes;
+            EditorBuildSettings.sceneListChanged += UpdateCachedBuildIndexes;
         }
 
         /// <summary>
-        /// ** Editor-only ** Gets the scene asset assigned in the inspector.
+        /// ** Editor-only **
+        /// Gets the scene asset, if assigned.
         /// </summary>
         public SceneAsset EditorSceneAsset => sceneAsset;
+        
+        /// <summary>
+        /// ** Editor-only **
+        /// Retrieves the build index of the specified scene asset.
+        /// </summary>
+        /// <returns>The build index, -1 if not found.</returns>
+        static int GetSceneBuildIndex(SceneAsset sceneAsset)
+        {
+            if (sceneAsset == null || !cachedBuildIndexes.TryGetValue(sceneAsset, out int buildIndex))
+                return -1;
+            
+            return buildIndex;
+        }
 
 #endif
+
+        #endregion
     }
 }
-#endif
